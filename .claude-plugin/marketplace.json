@@ -1,0 +1,6 @@
+{
+  "name": "secret-guard",
+  "description": "secret-guard, a Claude Code mod that blocks secrets from being written or committed",
+  "owner": { "name": "VeraStack Labs" },
+  "plugins": [{ "name": "secret-guard", "source": "./" }]
+}
