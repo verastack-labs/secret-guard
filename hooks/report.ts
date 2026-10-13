@@ -22,9 +22,9 @@ export function formatDeny(kind: BlockKind, findings: readonly Finding[], files:
   return `secret-guard blocked this ${kind}: ${shown}${more}.\n${ADVICE}`
 }
 
-/** The one-line toast the user sees. */
+/** The one-line toast the user sees. The engine shows it under the mod's name, so the text leaves the name out. */
 export function formatToast(kind: BlockKind, findings: readonly Finding[], files: readonly string[]): string {
   const items = describeItems(findings, files)
   const more = items.length > 1 ? ` (+${items.length - 1} more)` : ''
-  return `secret-guard blocked a ${kind}: ${items[0] ?? 'a likely secret'}${more}`
+  return `Blocked a ${kind}: ${items[0] ?? 'a likely secret'}${more}`
 }

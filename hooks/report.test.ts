@@ -29,7 +29,7 @@ describe('formatDeny', () => {
 describe('formatToast', () => {
   test('shows the first item and a count of the rest', () => {
     expect(formatToast('command', [finding(1), finding(2)], [])).toBe(
-      'secret-guard blocked a command: GitHub token (ghp_…XyZ9) on line 1 (+1 more)',
+      'Blocked a command: GitHub token (ghp_…XyZ9) on line 1 (+1 more)',
     )
   })
 })

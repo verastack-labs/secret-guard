@@ -33,11 +33,11 @@ async function gate($: Dollar, kind: BlockKind, findings: readonly Finding[], fi
   if (findings.length === 0 && files.length === 0) return undefined
   if (await read($, allowNext)) {
     await update($, allowNext, () => false)
-    $.ui.toast('secret-guard: override used, letting this call through once')
+    $.ui.toast('Override used, letting this call through once')
     return undefined
   }
   const count = await update($, blockedCount, n => n + 1)
-  $.ui.status(`secret-guard: ${count} blocked`)
+  $.ui.status(`${count} blocked`)
   $.ui.toast(formatToast(kind, findings, files))
   return { deny: formatDeny(kind, findings, files) }
 }
@@ -55,7 +55,7 @@ async function checkCommand($: Dollar, config: Config, command: string): Promise
   const run = (argv: readonly string[], init?: ProcessRunInit) => $.process.run(argv, init)
   for (const step of parseGitSteps(command)) {
     const found = await checkGitStep(run, step, config.patterns, config.isSkipped)
-    if (found.isTruncated) $.ui.toast('secret-guard: part of the git output was too large to check')
+    if (found.isTruncated) $.ui.toast('Part of the git output was too large to check')
     if (found.findings.length === 0 && found.files.length === 0) continue
     return gate($, step.kind === 'commit' ? 'commit' : 'command', found.findings, found.files)
   }
@@ -76,7 +76,7 @@ export const register: Register = (on, options) => {
       name: 'allow-secret',
       description: 'Let the next call secret-guard blocks go through once',
     })
-    for (const error of user.errors) $.ui.toast(`secret-guard skipped a pattern: ${error}`)
+    for (const error of user.errors) $.ui.toast(`Skipped a pattern: ${error}`)
     return next(e)
   })
 

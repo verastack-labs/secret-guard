@@ -10,7 +10,7 @@ test('a Write containing a GitHub token is denied without echoing it', async ($,
   expect(ran.deny).not.toContain(fake.github())
   expect(seen.toasts).toHaveLength(1)
   expect(seen.toasts[0]).not.toContain(fake.github())
-  expect(seen.statuses).toEqual(['secret-guard: 1 blocked'])
+  expect(seen.statuses).toEqual(['1 blocked'])
 })
 
 test('a clean Write passes with no toast', async ($, on) => {
@@ -38,7 +38,7 @@ test('/allow-secret lets exactly one blocked call through', async ($, on) => {
   expect(reply.text).toBe('The next blocked call will go through once.')
   const first = await $.tool.call({ tool: 'Write', file_path: 'a.ts', content: fake.aws() })
   expect(first.deny).toBeUndefined()
-  expect(seen.toasts).toEqual(['secret-guard: override used, letting this call through once'])
+  expect(seen.toasts).toEqual(['Override used, letting this call through once'])
   const second = await $.tool.call({ tool: 'Write', file_path: 'a.ts', content: fake.aws() })
   expect(second.deny).toBeDefined()
 })
@@ -55,7 +55,7 @@ test('the block count rises with each block', async ($, on) => {
   const seen = harness(on)
   await $.tool.call({ tool: 'Write', file_path: 'a.ts', content: fake.aws() })
   await $.tool.call({ tool: 'Write', file_path: 'b.ts', content: fake.npm() })
-  expect(seen.statuses).toEqual(['secret-guard: 1 blocked', 'secret-guard: 2 blocked'])
+  expect(seen.statuses).toEqual(['1 blocked', '2 blocked'])
 })
 
 test('an Edit removing a secret passes', async ($, on) => {

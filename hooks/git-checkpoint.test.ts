@@ -95,7 +95,7 @@ test('a truncated diff warns and still scans what came back', async ($, on) => {
     [`git diff --cached ${DIFF}`]: { stdout: stagedDiff('src/a.ts', '+const a = 1'), isStdoutTruncated: true },
   })
   expect((await $.tool.call({ tool: 'Bash', command: 'git commit -m x' })).deny).toBeUndefined()
-  expect(seen.toasts).toEqual(['secret-guard: part of the git output was too large to check'])
+  expect(seen.toasts).toEqual(['Part of the git output was too large to check'])
 })
 
 test('a fixture committed with a fake key passes, a fixtures .env does not', async ($, on) => {

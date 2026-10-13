@@ -1,6 +1,6 @@
 {
   "name": "secret-guard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Blocks API keys, tokens and private keys from being written to disk, put on a command line, or committed to git by Claude.",
   "author": { "name": "VeraStack Labs" },
   "types": "./types/index.d.ts",
