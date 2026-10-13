@@ -82,7 +82,7 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'allow-secret' }, async $ => {
     await update($, allowNext, () => true)
-    return { text: 'secret-guard: the next blocked call will go through once.' }
+    return { text: 'The next blocked call will go through once.' }
   })
 
   on('tool.call', { tool: 'Write' }, async ($, e, next) => (await checkWrite($, config, e.file_path, e.content)) ?? next(e)).catch(

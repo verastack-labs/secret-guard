@@ -35,7 +35,7 @@ test('with an empty skip list, a Write under fixtures is denied', { options: { s
 test('/allow-secret lets exactly one blocked call through', async ($, on) => {
   const seen = harness(on)
   const reply = await $.command.run(slash('allow-secret'))
-  expect(reply.text).toBe('secret-guard: the next blocked call will go through once.')
+  expect(reply.text).toBe('The next blocked call will go through once.')
   const first = await $.tool.call({ tool: 'Write', file_path: 'a.ts', content: fake.aws() })
   expect(first.deny).toBeUndefined()
   expect(seen.toasts).toEqual(['secret-guard: override used, letting this call through once'])
