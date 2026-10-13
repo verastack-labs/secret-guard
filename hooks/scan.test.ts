@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import { fake } from './helpers'
 import { BUILTIN_PATTERNS, parseUserPatterns } from './patterns'
-import { lineAt, mask, scan } from './scan'
+import { lineAt, mask, scan, scanNew } from './scan'
 
 const names = (text: string) => scan(text, BUILTIN_PATTERNS).map(f => f.name)
 
@@ -64,6 +64,28 @@ describe('line numbers', () => {
     const found = scan(text, BUILTIN_PATTERNS)
     expect(found.map(f => [f.name, f.line])).toEqual([['Stripe key', 20001]])
     expect(Date.now() - started).toBeLessThan(2000)
+  })
+  test('2,000 keys in a 2 MB write are found inside the time budget', () => {
+    const line = `k = '${fake.stripe()}'` + 'x'.repeat(960) + '\n'
+    const text = line.repeat(2000)
+    const started = Date.now()
+    const found = scan(text, BUILTIN_PATTERNS)
+    expect(found).toHaveLength(2000)
+    expect(found[1999]?.line).toBe(2000)
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+})
+
+describe('scanNew', () => {
+  test('drops secrets the old text already held', () => {
+    const before = `const k = '${fake.github()}'\nconst a = 1`
+    const after = `const k = '${fake.github()}'\nconst a = 2`
+    expect(scanNew(after, before, BUILTIN_PATTERNS)).toEqual([])
+  })
+  test('keeps a new secret beside an existing one', () => {
+    const before = `const k = '${fake.github()}'`
+    const after = `const k = '${fake.github()}'\nconst j = '${fake.aws()}'`
+    expect(scanNew(after, before, BUILTIN_PATTERNS).map(f => [f.name, f.line])).toEqual([['AWS access key', 2]])
   })
 })
 

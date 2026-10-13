@@ -8,7 +8,7 @@ import type { Pattern } from './patterns'
 import { makeSkipMatcher } from './paths'
 import { formatDeny, formatToast } from './report'
 import type { BlockKind } from './report'
-import { scan } from './scan'
+import { scan, scanNew } from './scan'
 import type { Finding } from './scan'
 
 const allowNext = atom({ plugin: 'secret-guard', key: 'allowNext' } as const, false)
@@ -42,9 +42,10 @@ async function gate($: Dollar, kind: BlockKind, findings: readonly Finding[], fi
   return { deny: formatDeny(kind, findings, files) }
 }
 
-async function checkWrite($: Dollar, config: Config, path: string, text: string): Promise<Verdict> {
+/** Checks written text; `before` is what an Edit replaces, so secrets it already held do not count. */
+async function checkWrite($: Dollar, config: Config, path: string, text: string, before = ''): Promise<Verdict> {
   if (config.isSkipped(path)) return undefined
-  return gate($, 'write', scan(text, config.patterns), [])
+  return gate($, 'write', scanNew(text, before, config.patterns), [])
 }
 
 async function checkCommand($: Dollar, config: Config, command: string): Promise<Verdict> {
@@ -88,7 +89,7 @@ export const register: Register = (on, options) => {
     ($, e, next) => failClosed(e, next, patterns),
   )
 
-  on('tool.call', { tool: 'Edit' }, async ($, e, next) => (await checkWrite($, config, e.file_path, e.new_string)) ?? next(e)).catch(
+  on('tool.call', { tool: 'Edit' }, async ($, e, next) => (await checkWrite($, config, e.file_path, e.new_string, e.old_string)) ?? next(e)).catch(
     ($, e, next) => failClosed(e, next, patterns),
   )
 

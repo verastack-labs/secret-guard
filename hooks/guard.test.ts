@@ -64,6 +64,28 @@ test('an Edit removing a secret passes', async ($, on) => {
   expect(ran.deny).toBeUndefined()
 })
 
+test('an Edit keeping an existing secret as context passes', async ($, on) => {
+  harness(on)
+  const ran = await $.tool.call({
+    tool: 'Edit',
+    file_path: 'a.ts',
+    old_string: `const k = '${fake.github()}'\nconst a = 1`,
+    new_string: `const k = '${fake.github()}'\nconst a = 2`,
+  })
+  expect(ran.deny).toBeUndefined()
+})
+
+test('an Edit adding a new secret beside an existing one is denied', async ($, on) => {
+  harness(on)
+  const ran = await $.tool.call({
+    tool: 'Edit',
+    file_path: 'a.ts',
+    old_string: `const k = '${fake.github()}'`,
+    new_string: `const k = '${fake.github()}'\nconst j = '${fake.aws()}'`,
+  })
+  expect(ran.deny).toStartWith('secret-guard blocked this write: AWS access key')
+})
+
 test('an Edit adding a secret is denied', async ($, on) => {
   harness(on)
   const ran = await $.tool.call({ tool: 'Edit', file_path: 'a.ts', old_string: 'TOKEN', new_string: fake.slack() })

@@ -6,7 +6,7 @@ It blocks API keys, tokens and private keys in:
 
 - files Claude writes or edits (Write, Edit, NotebookEdit),
 - commands Claude runs (Bash, PowerShell),
-- `git add` of secrets files like `.env`, `*.pem` and `id_rsa`,
+- `git add` of secrets files like `.env`, `*.pem` and `id_rsa`, or of changes and new files that contain a secret,
 - `git commit` when the staged changes add a secret or a secrets file.
 
 Claude is told what was found, with the secret masked, and asked to read the value from an environment variable instead. You see a toast and a running count in the status line.

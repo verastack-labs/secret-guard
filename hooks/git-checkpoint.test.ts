@@ -124,6 +124,57 @@ test('with the git checkpoint off, git is never run', { options: { gitCheckpoint
   expect(calls).toEqual([])
 })
 
+const ADD_DIFF = 'git diff --no-color --no-ext-diff -U0 --'
+const UNTRACKED = 'git ls-files --others --exclude-standard --'
+const NEW_FILE = 'git diff --no-index --no-color --no-ext-diff -U0 -- /dev/null'
+
+test('git add scans the content it would stage', async ($, on) => {
+  harness(on)
+  git(on, {
+    'git add --dry-run src/a.ts': { stdout: "add 'src/a.ts'\n" },
+    [`${ADD_DIFF} src/a.ts`]: { stdout: stagedDiff('src/a.ts', `+${fake.github()}`) },
+  })
+  const ran = await $.tool.call({ tool: 'Bash', command: 'git add src/a.ts' })
+  expect(ran.deny).toStartWith('secret-guard blocked this command: GitHub token')
+  expect(ran.deny).toContain('of src/a.ts')
+})
+
+test('git add scans new untracked files', async ($, on) => {
+  harness(on)
+  git(on, {
+    'git add --dry-run .': { stdout: "add 'new.ts'\n" },
+    [`${UNTRACKED} .`]: { stdout: 'new.ts\n' },
+    [`${NEW_FILE} new.ts`]: { exitCode: 1, stdout: stagedDiff('new.ts', `+${fake.npm()}`) },
+  })
+  const ran = await $.tool.call({ tool: 'Bash', command: 'git add .' })
+  expect(ran.deny).toStartWith('secret-guard blocked this command: npm token')
+  expect(ran.deny).toContain('of new.ts')
+})
+
+test('git add -A && git commit is caught at the add', async ($, on) => {
+  harness(on)
+  git(on, {
+    'git add --dry-run -A': { stdout: "add 'src/pay.ts'\n" },
+    [ADD_DIFF]: { stdout: stagedDiff('src/pay.ts', `+const k = '${fake.stripe()}'`) },
+  })
+  const ran = await $.tool.call({ tool: 'Bash', command: 'git add -A && git commit -m "x"' })
+  expect(ran.deny).toStartWith('secret-guard blocked this command: Stripe key')
+})
+
+test('git add -u does not look at untracked files', async ($, on) => {
+  harness(on)
+  const calls = git(on, { 'git add --dry-run -u': { stdout: "add 'src/a.ts'\n" } })
+  await $.tool.call({ tool: 'Bash', command: 'git add -u' })
+  expect(calls.map(c => c.argv)).toEqual(['git add --dry-run -u', ADD_DIFF])
+})
+
+test('a subshell cd points git at that folder', async ($, on) => {
+  harness(on)
+  const calls = git(on, {})
+  await $.tool.call({ tool: 'Bash', command: '(cd sub && git commit -m x)' })
+  expect(calls.map(c => c.cwd)).toEqual(['sub', 'sub'])
+})
+
 test('an interactive git add is not dry-run', async ($, on) => {
   harness(on)
   const calls = git(on, {})

@@ -52,6 +52,37 @@ describe('parseGitSteps', () => {
   test('a commit message holding ; or && is still a commit', () => {
     expect(parseGitSteps('git commit -m "fix; tidy && more"')).toEqual([{ kind: 'commit', cwd: undefined, all: false }])
   })
+  test('flags after a quoted message holding a separator still count', () => {
+    expect(parseGitSteps('git commit -m "fix; tidy" -a')).toEqual([{ kind: 'commit', cwd: undefined, all: true }])
+    expect(parseGitSteps('git commit -m "say \\"hi\\"" -a')).toEqual([{ kind: 'commit', cwd: undefined, all: true }])
+  })
+  test('a cd inside a quoted message does not move later steps', () => {
+    expect(parseGitSteps('git commit -m "subject\ncd elsewhere" && git add .')).toEqual([
+      { kind: 'commit', cwd: undefined, all: false },
+      { kind: 'add', cwd: undefined, args: ['.'] },
+    ])
+  })
+  test('a subshell cd applies inside the parentheses only', () => {
+    expect(parseGitSteps('(cd sub && git commit -m x) && git add .')).toEqual([
+      { kind: 'commit', cwd: 'sub', all: false },
+      { kind: 'add', cwd: undefined, args: ['.'] },
+    ])
+  })
+  test('pipes, background &, env prefixes and full paths to git are understood', () => {
+    const commit = [{ kind: 'commit', cwd: undefined, all: false }]
+    expect(parseGitSteps('echo x | git commit -F -')).toEqual(commit)
+    expect(parseGitSteps('npm test & git add .')).toEqual([{ kind: 'add', cwd: undefined, args: ['.'] }])
+    expect(parseGitSteps('GIT_AUTHOR_NAME=x git commit -m y')).toEqual(commit)
+    expect(parseGitSteps('/usr/bin/git commit -m y')).toEqual(commit)
+    expect(parseGitSteps('& "C:\\Program Files\\Git\\bin\\git.exe" commit -m y')).toEqual(commit)
+  })
+  test('backslash line continuations join the command', () => {
+    expect(parseGitSteps('git \\\n  commit -am x')).toEqual([{ kind: 'commit', cwd: undefined, all: true }])
+  })
+  test('cd flags are skipped before the folder', () => {
+    expect(parseGitSteps('Set-Location -Path C:\\repo; git add .')).toEqual([{ kind: 'add', cwd: 'C:\\repo', args: ['.'] }])
+    expect(parseGitSteps('cd -- sub && git add .')).toEqual([{ kind: 'add', cwd: 'sub', args: ['.'] }])
+  })
 })
 
 const noSkip = () => false
