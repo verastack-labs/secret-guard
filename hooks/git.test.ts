@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { joinDir, parseGitSteps, tokenize } from './git'
+import { joinDir, parseGitSteps, scanDiff, tokenize } from './git'
+import { fake } from './helpers'
+import { BUILTIN_PATTERNS } from './patterns'
 
 describe('tokenize', () => {
   test('keeps quoted arguments whole', () => {
@@ -49,5 +51,50 @@ describe('parseGitSteps', () => {
   })
   test('a commit message holding ; or && is still a commit', () => {
     expect(parseGitSteps('git commit -m "fix; tidy && more"')).toEqual([{ kind: 'commit', cwd: undefined, all: false }])
+  })
+})
+
+const noSkip = () => false
+
+const diffOf = (path: string, lines: string[], start = 1) =>
+  [
+    `diff --git a/${path} b/${path}`,
+    'index 1111111..2222222 100644',
+    `--- a/${path}`,
+    `+++ b/${path}`,
+    `@@ -0,0 +${start},${lines.length} @@`,
+    ...lines,
+  ].join('\n')
+
+describe('scanDiff', () => {
+  test('finds an added secret with its file and new line number', () => {
+    const diff = diffOf('src/pay.ts', ['+const a = 1', `+const key = '${fake.stripe()}'`], 10)
+    expect(scanDiff(diff, BUILTIN_PATTERNS, noSkip)).toEqual([
+      { name: 'Stripe key', line: 11, preview: expect.any(String), file: 'src/pay.ts' },
+    ])
+  })
+  test('ignores removed lines', () => {
+    const diff = diffOf('src/pay.ts', [`-const key = '${fake.stripe()}'`, '+const key = process.env.KEY'])
+    expect(scanDiff(diff, BUILTIN_PATTERNS, noSkip)).toEqual([])
+  })
+  test('tracks files and hunks separately', () => {
+    const diff = [
+      diffOf('a.ts', ['+one'], 5),
+      '@@ -20,0 +40,1 @@',
+      `+${fake.aws()}`,
+      diffOf('b.ts', [`+${fake.npm()}`], 2),
+    ].join('\n')
+    expect(scanDiff(diff, BUILTIN_PATTERNS, noSkip).map(f => [f.file, f.line, f.name])).toEqual([
+      ['a.ts', 40, 'AWS access key'],
+      ['b.ts', 2, 'npm token'],
+    ])
+  })
+  test('reads Windows line endings', () => {
+    const diff = diffOf('src/pay.ts', ['+const a = 1', `+${fake.stripe()}`]).replace(/\n/g, '\r\n')
+    expect(scanDiff(diff, BUILTIN_PATTERNS, noSkip).map(f => [f.file, f.line])).toEqual([['src/pay.ts', 2]])
+  })
+  test('skips findings in skipped paths', () => {
+    const diff = diffOf('fixtures/keys.ts', [`+${fake.stripe()}`])
+    expect(scanDiff(diff, BUILTIN_PATTERNS, path => path.startsWith('fixtures/'))).toEqual([])
   })
 })

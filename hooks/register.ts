@@ -1,7 +1,8 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, PluginOptions, Register } from 'claude-code'
+import type { EngineInterface, PluginOptions, ProcessRunInit, Register } from 'claude-code'
 
 import { failClosed } from './fail'
+import { checkGitStep, parseGitSteps } from './git'
 import { BUILTIN_PATTERNS, parseUserPatterns } from './patterns'
 import type { Pattern } from './patterns'
 import { makeSkipMatcher } from './paths'
@@ -20,6 +21,7 @@ type Verdict = { deny: string } | undefined
 type Config = {
   patterns: readonly Pattern[]
   isSkipped: (path: string) => boolean
+  isGitCheckpointOn: boolean
 }
 
 function asList(value: PluginOptions[string] | undefined): readonly string[] {
@@ -46,13 +48,27 @@ async function checkWrite($: Dollar, config: Config, path: string, text: string)
 }
 
 async function checkCommand($: Dollar, config: Config, command: string): Promise<Verdict> {
-  return gate($, 'command', scan(command, config.patterns), [])
+  const findings = scan(command, config.patterns)
+  if (findings.length > 0) return gate($, 'command', findings, [])
+  if (!config.isGitCheckpointOn) return undefined
+  const run = (argv: readonly string[], init?: ProcessRunInit) => $.process.run(argv, init)
+  for (const step of parseGitSteps(command)) {
+    const found = await checkGitStep(run, step, config.patterns, config.isSkipped)
+    if (found.isTruncated) $.ui.toast('secret-guard: part of the git output was too large to check')
+    if (found.findings.length === 0 && found.files.length === 0) continue
+    return gate($, step.kind === 'commit' ? 'commit' : 'command', found.findings, found.files)
+  }
+  return undefined
 }
 
 export const register: Register = (on, options) => {
   const user = parseUserPatterns(asList(options.extraPatterns))
   const patterns = [...BUILTIN_PATTERNS, ...user.patterns]
-  const config: Config = { patterns, isSkipped: makeSkipMatcher(asList(options.skipPaths)) }
+  const config: Config = {
+    patterns,
+    isSkipped: makeSkipMatcher(asList(options.skipPaths)),
+    isGitCheckpointOn: options.gitCheckpoint !== false,
+  }
 
   on('session.start', async ($, e, next) => {
     await $.command.register({

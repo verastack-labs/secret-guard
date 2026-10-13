@@ -1,3 +1,10 @@
+import type { ProcessRunInit, ProcessRunResult } from 'claude-code'
+
+import type { Pattern } from './patterns'
+import { isSecretFile } from './paths'
+import { scan } from './scan'
+import type { Finding } from './scan'
+
 /** One git command found in a shell command, with the folder it runs in. */
 export type GitStep =
   | { kind: 'add'; cwd: string | undefined; args: string[] }
@@ -61,4 +68,96 @@ export function parseGitSteps(command: string): GitStep[] {
     if (subcommand === 'commit') steps.push({ kind: 'commit', cwd: stepCwd, all: rest.some(isAllFlag) })
   }
   return steps
+}
+
+/** `$.process.run`, passed in so the checks stay testable. */
+export type Run = (argv: readonly string[], init?: ProcessRunInit) => Promise<ProcessRunResult>
+
+/** What one git step would let through: secrets files and secrets in added lines. */
+export type GitResult = { files: string[]; findings: Finding[]; isTruncated: boolean }
+
+const INTERACTIVE = new Set(['-p', '--patch', '-i', '--interactive', '-e', '--edit'])
+const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '-U0']
+const GIT_TIMEOUT_MS = 15000
+
+function nothing(): GitResult {
+  return { files: [], findings: [], isTruncated: false }
+}
+
+function lines(text: string): string[] {
+  return text.split(/\r?\n/)
+}
+
+/** Runs git; any failure (non-zero exit, missing git, a deny) reads as no answer. */
+async function tryRun(run: Run, argv: readonly string[], init: ProcessRunInit): Promise<ProcessRunResult | undefined> {
+  try {
+    const result = await run(argv, init)
+    return result.exitCode === 0 ? result : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Secrets on the added lines of a unified diff, each with its file and new line number. */
+export function scanDiff(diff: string, patterns: readonly Pattern[], isSkipped: (path: string) => boolean): Finding[] {
+  const findings: Finding[] = []
+  let file = ''
+  let line = 0
+  for (const raw of lines(diff)) {
+    if (raw.startsWith('+++ ')) {
+      file = raw.slice(4).replace(/^b\//, '')
+      continue
+    }
+    if (raw.startsWith('--- ')) continue
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(raw)
+    if (hunk !== null) {
+      line = Number(hunk[1])
+      continue
+    }
+    if (raw.startsWith('+')) {
+      if (!isSkipped(file)) {
+        for (const finding of scan(raw.slice(1), patterns)) findings.push({ ...finding, line, file })
+      }
+      line += 1
+    } else if (raw.startsWith(' ')) {
+      line += 1
+    }
+  }
+  return findings
+}
+
+/**
+ * Checks one git step. An add is dry-run to list what it would stage; a
+ * commit's staged names and added lines are read from git diff, against
+ * HEAD for -a and the index otherwise.
+ */
+export async function checkGitStep(
+  run: Run,
+  step: GitStep,
+  patterns: readonly Pattern[],
+  isSkipped: (path: string) => boolean,
+): Promise<GitResult> {
+  const init: ProcessRunInit = step.cwd === undefined ? { timeoutMs: GIT_TIMEOUT_MS } : { cwd: step.cwd, timeoutMs: GIT_TIMEOUT_MS }
+  if (step.kind === 'add') {
+    if (step.args.some(arg => INTERACTIVE.has(arg))) return nothing()
+    const dryRun = await tryRun(run, ['git', 'add', '--dry-run', ...step.args], init)
+    if (dryRun === undefined) return nothing()
+    const files = lines(dryRun.stdout)
+      .map(entry => /^add '(.*)'$/.exec(entry)?.[1])
+      .filter((path): path is string => path !== undefined && isSecretFile(path))
+    return { files, findings: [], isTruncated: dryRun.isStdoutTruncated }
+  }
+  const base = step.all ? ['HEAD'] : ['--cached']
+  const names = await tryRun(run, ['git', 'diff', ...base, '--name-only'], init)
+  if (names === undefined) return nothing()
+  const files = lines(names.stdout)
+    .map(entry => entry.trim())
+    .filter(path => path !== '' && isSecretFile(path))
+  const diff = await tryRun(run, ['git', 'diff', ...base, ...DIFF_FLAGS], init)
+  if (diff === undefined) return { files, findings: [], isTruncated: names.isStdoutTruncated }
+  return {
+    files,
+    findings: scanDiff(diff.stdout, patterns, isSkipped),
+    isTruncated: names.isStdoutTruncated || diff.isStdoutTruncated,
+  }
 }
