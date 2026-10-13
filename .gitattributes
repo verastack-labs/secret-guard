@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+# Licence texts are reproduced, not authored, so they pass through untouched.
+LICENSE -text

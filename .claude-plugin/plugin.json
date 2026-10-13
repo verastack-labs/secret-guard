@@ -1,0 +1,29 @@
+{
+  "name": "secret-guard",
+  "version": "0.1.0",
+  "description": "Blocks API keys, tokens and private keys from being written to disk, put on a command line, or committed to git by Claude.",
+  "author": { "name": "VeraStack Labs" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "extraPatterns": {
+      "type": "string",
+      "multiple": true,
+      "title": "Extra patterns",
+      "description": "More secrets to block, one per entry, written Name=regex (for example: Mehfil API key=mhf_[A-Za-z0-9]{32})",
+      "default": []
+    },
+    "skipPaths": {
+      "type": "string",
+      "multiple": true,
+      "title": "Skip paths",
+      "description": "Glob patterns for files whose content is never scanned. Secrets files like .env are still blocked from git.",
+      "default": ["**/fixtures/**", "**/__snapshots__/**", "*.test.*", "*.spec.*"]
+    },
+    "gitCheckpoint": {
+      "type": "boolean",
+      "title": "Git checkpoint",
+      "description": "Check git add and git commit for secrets files and staged secrets",
+      "default": true
+    }
+  }
+}
