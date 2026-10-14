@@ -21,6 +21,15 @@ In a terminal Claude Code session (Claude Code 2.1.295 or newer):
 
 Answer `y` to add the marketplace, then pick a scope. The guard is active at once.
 
+`/plugin` works only in a terminal session; the Claude desktop app's Code tab does not offer it. From any shell instead:
+
+```
+claude plugin marketplace add verastack-labs/secret-guard
+claude plugin install secret-guard@secret-guard
+```
+
+Installed at the user scope, it also loads in the desktop app's sessions, starting with the next one.
+
 ## Letting one call through
 
 For a placeholder or a test value, run:
