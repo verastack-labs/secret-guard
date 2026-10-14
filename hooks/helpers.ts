@@ -51,7 +51,8 @@ export type GitAnswer = Partial<ProcessRunResult> | 'missing'
 export function git(on: On, answers: Readonly<Record<string, GitAnswer>>) {
   const calls: { argv: string; cwd: string | undefined }[] = []
   on('process.run', ($, e) => {
-    const argv = e.argv.join(' ')
+    // every check runs `git -c core.quotepath=off ...`; answers are keyed without that prefix
+    const argv = e.argv.join(' ').replace(/^git -c core\.quotepath=off /, 'git ')
     calls.push({ argv, cwd: e.init?.cwd })
     const answer = answers[argv]
     if (answer === 'missing') return { deny: 'git is not installed' }

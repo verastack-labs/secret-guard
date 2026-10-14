@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, PluginOptions, ProcessRunInit, Register } from 'claude-code'
+import type { Caught, EngineInterface, PluginOptions, ProcessRunInit, Register } from 'claude-code'
 
-import { failClosed } from './fail'
+import { CRASH_DENY, failClosed } from './fail'
 import { checkGitStep, parseGitSteps } from './git'
 import { BUILTIN_PATTERNS, parseUserPatterns } from './patterns'
 import type { Pattern } from './patterns'
@@ -48,6 +48,29 @@ async function checkWrite($: Dollar, config: Config, path: string, text: string,
   return gate($, 'write', scanNew(text, before, config.patterns), [])
 }
 
+/**
+ * Every guarding hook's `.catch`: `failClosed` decides, and a crash that blocks
+ * is counted and shown like any other block, so it is never silent.
+ */
+async function guardFailed<E extends object, R>(
+  $: Dollar,
+  e: E,
+  next: ((e: E) => Promise<R>) & Caught,
+  config: Config,
+): Promise<R | { deny: string }> {
+  const verdict = await failClosed(e, next, config.patterns, config.isSkipped)
+  if (next.error.kind !== 're-entry' && typeof verdict === 'object' && verdict !== null && 'deny' in verdict && verdict.deny === CRASH_DENY) {
+    try {
+      const count = await update($, blockedCount, n => n + 1)
+      $.ui.status(`${count} blocked`)
+      $.ui.toast('Could not check this call, so it was blocked. Run /allow-secret to let it through once.')
+    } catch {
+      // the block stands even when it cannot be shown
+    }
+  }
+  return verdict
+}
+
 async function checkCommand($: Dollar, config: Config, command: string): Promise<Verdict> {
   const findings = scan(command, config.patterns)
   if (findings.length > 0) return gate($, 'command', findings, [])
@@ -86,24 +109,24 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: 'Write' }, async ($, e, next) => (await checkWrite($, config, e.file_path, e.content)) ?? next(e)).catch(
-    ($, e, next) => failClosed(e, next, patterns),
+    ($, e, next) => guardFailed($, e, next, config),
   )
 
   on('tool.call', { tool: 'Edit' }, async ($, e, next) => (await checkWrite($, config, e.file_path, e.new_string, e.old_string)) ?? next(e)).catch(
-    ($, e, next) => failClosed(e, next, patterns),
+    ($, e, next) => guardFailed($, e, next, config),
   )
 
   on(
     'tool.call',
     { tool: 'NotebookEdit' },
     async ($, e, next) => (await checkWrite($, config, e.notebook_path, e.new_source)) ?? next(e),
-  ).catch(($, e, next) => failClosed(e, next, patterns))
+  ).catch(($, e, next) => guardFailed($, e, next, config))
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => (await checkCommand($, config, e.command)) ?? next(e)).catch(
-    ($, e, next) => failClosed(e, next, patterns),
+    ($, e, next) => guardFailed($, e, next, config),
   )
 
   on('tool.call', { tool: 'PowerShell' }, async ($, e, next) => (await checkCommand($, config, e.command)) ?? next(e)).catch(
-    ($, e, next) => failClosed(e, next, patterns),
+    ($, e, next) => guardFailed($, e, next, config),
   )
 }

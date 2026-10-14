@@ -108,3 +108,14 @@ describe('user patterns', () => {
     expect(scan('const a = 1\n', patterns)).toEqual([])
   })
 })
+
+describe('OpenAI and Anthropic patterns, minor fix', () => {
+  test('do not fire inside a longer dashed word', () => {
+    expect(scan('x-' + fake.openai(), BUILTIN_PATTERNS)).toEqual([])
+    expect(scan('x-' + fake.anthropic(), BUILTIN_PATTERNS)).toEqual([])
+  })
+  test('still fire after punctuation, quotes and equals signs', () => {
+    expect(scan('KEY=' + fake.openai(), BUILTIN_PATTERNS).map(f => f.name)).toEqual(['OpenAI key'])
+    expect(scan('"' + fake.anthropic() + '"', BUILTIN_PATTERNS).map(f => f.name)).toEqual(['Anthropic key'])
+  })
+})

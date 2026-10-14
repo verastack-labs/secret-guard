@@ -49,12 +49,12 @@ GitHub tokens, Anthropic keys, OpenAI keys, AWS access keys, Stripe live keys, S
 | Setting | Default | What it does |
 | --- | --- | --- |
 | Extra patterns | none | More secrets to block, one per entry, written `Name=regex`. |
-| Skip paths | `**/fixtures/**`, `**/__snapshots__/**`, `*.test.*`, `*.spec.*` | Files whose content is never scanned. Secrets files like `.env` are still blocked from git. |
+| Skip paths | `**/fixtures/**`, `**/__snapshots__/**`, `*.test.*`, `*.spec.*` | Files whose content is never scanned. A glob with a `/` matches anywhere in the path, either slash works, and case is ignored. Secrets files like `.env` are still blocked from git. |
 | Git checkpoint | on | Checks `git add` and `git commit`. |
 
 ## Limits
 
-secret-guard sees only what Claude does. Commits you make in your own terminal are not checked. It follows one leading `cd` or `git -C`, not longer chains of directory changes. It does not hide secrets that Claude reads from existing files.
+secret-guard sees only what Claude does. Commits you make in your own terminal are not checked. It follows `cd`, `pushd`, `Set-Location` and `git -C` through a chain of commands, with a `cd` inside parentheses lasting until the closing one, but not directory changes made inside scripts or functions. A command that rewrites a file and stages it in the same chain (`sed -i ... && git add file`) is checked against the file as it was before the command ran, so run the two steps separately when it matters. It does not hide secrets that Claude reads from existing files.
 
 ## Development
 

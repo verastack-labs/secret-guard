@@ -4,8 +4,9 @@ export type Pattern = { name: string; regex: RegExp }
 /** Known secret formats. Each needs a recognisable prefix or structure. */
 export const BUILTIN_PATTERNS: readonly Pattern[] = [
   { name: 'GitHub token', regex: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})(?![A-Za-z0-9_])/ },
-  { name: 'Anthropic key', regex: /\bsk-ant-[A-Za-z0-9_-]{32,}/ },
-  { name: 'OpenAI key', regex: /\bsk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,}/ },
+  // not after a letter, digit, _ or -, where \b alone would let x-sk-... through
+  { name: 'Anthropic key', regex: /(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{32,}/ },
+  { name: 'OpenAI key', regex: /(?<![A-Za-z0-9_-])sk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,}/ },
   { name: 'AWS access key', regex: /\b(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])/ },
   { name: 'Stripe key', regex: /\b(?:sk|rk)_live_[A-Za-z0-9]{24,}/ },
   { name: 'Slack token', regex: /\b(?:xox[bp]|xapp)-[A-Za-z0-9-]{10,}/ },

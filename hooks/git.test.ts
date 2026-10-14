@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { joinDir, parseGitSteps, scanDiff, tokenize } from './git'
+import { checkGitStep, joinDir, parseGitSteps, scanDiff, tokenize, unquote } from './git'
 import { fake } from './helpers'
 import { BUILTIN_PATTERNS } from './patterns'
 
@@ -127,5 +127,40 @@ describe('scanDiff', () => {
   test('skips findings in skipped paths', () => {
     const diff = diffOf('fixtures/keys.ts', [`+${fake.stripe()}`])
     expect(scanDiff(diff, BUILTIN_PATTERNS, path => path.startsWith('fixtures/'))).toEqual([])
+  })
+})
+
+describe('minor fixes', () => {
+  test('an added line whose content starts with "++ " is content, not a file header', () => {
+    const diff = ['diff --git a/a.ts b/a.ts', '--- a/a.ts', '+++ b/a.ts', '@@ -1,0 +1,2 @@', `+++ ${fake.github()}`, '+ok'].join('\n')
+    const findings = scanDiff(diff, BUILTIN_PATTERNS, () => false)
+    expect(findings.map(f => [f.file, f.line])).toEqual([['a.ts', 1]])
+  })
+  test('a removed line whose content starts with "-- " does not end the hunk', () => {
+    const diff = ['diff --git a/a.ts b/a.ts', '--- a/a.ts', '+++ b/a.ts', '@@ -1,1 +1,1 @@', '--- old', `+${fake.aws()}`].join('\n')
+    expect(scanDiff(diff, BUILTIN_PATTERNS, () => false).map(f => [f.file, f.line])).toEqual([['a.ts', 1]])
+  })
+  test('git options that take a separate value are not read as the subcommand', () => {
+    expect(parseGitSteps('git --git-dir /r/.git --work-tree /r add .')).toEqual([
+      { kind: 'add', cwd: undefined, args: ['.'], globals: ['--git-dir', '/r/.git', '--work-tree', '/r'] },
+    ])
+    expect(parseGitSteps('git --namespace ns commit -m x')).toEqual([{ kind: 'commit', cwd: undefined, all: false, globals: ['--namespace', 'ns'] }])
+  })
+  test('C-quoted paths are unquoted, including escaped quotes and UTF-8 octal bytes', () => {
+    expect(unquote('"caf\\303\\251.ts"')).toBe('café.ts')
+    expect(unquote('"sp\\"ace\\tx/.env"')).toBe('sp"ace\tx/.env')
+    expect(unquote('plain/path.ts')).toBe('plain/path.ts')
+    const diff = ['diff --git "a/caf\\303\\251.ts" "b/caf\\303\\251.ts"', '--- "a/caf\\303\\251.ts"', '+++ "b/caf\\303\\251.ts"', '@@ -0,0 +1 @@', `+${fake.npm()}`].join('\n')
+    expect(scanDiff(diff, BUILTIN_PATTERNS, () => false)[0]?.file).toBe('café.ts')
+  })
+  test('every git check runs with quotepath off and the step\'s global options', async () => {
+    const argvs: string[][] = []
+    const run = async (argv: readonly string[]) => {
+      argvs.push([...argv])
+      return { exitCode: 0, stdout: argv.includes('--name-only') ? '"dir/sp\\"ace/.env"\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+    }
+    const result = await checkGitStep(run, { kind: 'commit', cwd: undefined, all: false, globals: ['--git-dir', '/r/.git'] }, BUILTIN_PATTERNS, () => false)
+    expect(argvs.every(argv => argv.slice(0, 5).join(' ') === 'git -c core.quotepath=off --git-dir /r/.git')).toBe(true)
+    expect(result.files).toEqual(['dir/sp"ace/.env'])
   })
 })

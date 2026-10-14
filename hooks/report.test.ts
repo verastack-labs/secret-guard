@@ -64,3 +64,15 @@ describe('failClosed', () => {
     })
   })
 })
+
+describe('failClosed on re-entry, minor fix', () => {
+  const reentry = Object.assign(async (_e: object) => ({ result: 'ran' }), { called: false, error: { kind: 're-entry' } }) as never
+  test('honours the skip list for a write', async () => {
+    const e = { file_path: 'C:/repo/fixtures/keys.ts', content: fake.github() }
+    expect(await failClosed(e, reentry, BUILTIN_PATTERNS, path => path.includes('fixtures'))).toEqual({ result: 'ran' })
+  })
+  test('still denies a secret outside the skip list', async () => {
+    const e = { file_path: 'src/keys.ts', content: fake.github() }
+    expect(await failClosed(e, reentry, BUILTIN_PATTERNS, path => path.includes('fixtures'))).toEqual({ deny: REENTRY_DENY })
+  })
+})

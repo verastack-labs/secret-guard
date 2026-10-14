@@ -119,3 +119,11 @@ test(
     expect(ran.deny).toStartWith('secret-guard blocked this write: Mehfil key')
   },
 )
+
+test('a crash that blocks a call also counts it and says so', async ($, on) => {
+  const seen = harness(on)
+  const ran = await $.tool.call({ tool: 'Write', content: fake.aws() } as never)
+  expect(ran.deny).toBeDefined()
+  expect(seen.statuses).toEqual(['1 blocked'])
+  expect(seen.toasts).toEqual(['Could not check this call, so it was blocked. Run /allow-secret to let it through once.'])
+})

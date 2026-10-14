@@ -7,8 +7,13 @@ import type { Finding } from './scan'
 
 /** One git command found in a shell command, with the folder it runs in. */
 export type GitStep =
-  | { kind: 'add'; cwd: string | undefined; args: string[] }
-  | { kind: 'commit'; cwd: string | undefined; all: boolean }
+  | { kind: 'add'; cwd: string | undefined; args: string[]; globals?: string[] }
+  | { kind: 'commit'; cwd: string | undefined; all: boolean; globals?: string[] }
+
+/** git options before the subcommand that take their value as the next word. */
+const VALUE_OPTIONS = new Set(['--git-dir', '--work-tree', '--namespace', '--config-env', '--super-prefix'])
+/** The same options in their `--option=value` form, passed on to the checks too. */
+const VALUE_OPTION_PREFIXES = [...VALUE_OPTIONS].map(option => `${option}=`)
 
 /** A word of a shell command, or an operator that separates commands. */
 type Lexeme = { kind: 'word'; text: string } | { kind: 'separator'; text: string }
@@ -125,23 +130,31 @@ function readCommand(words: readonly string[], cwd: string | undefined, steps: G
   }
   if (name !== 'git') return cwd
   let stepCwd = cwd
+  const globals: string[] = []
   let i = 1
   while (i < tokens.length && (tokens[i] ?? '').startsWith('-')) {
-    const flag = tokens[i]
+    const flag = tokens[i] ?? ''
     if (flag === '-C') {
       const dir = tokens[i + 1]
       if (dir !== undefined) stepCwd = joinDir(stepCwd, dir)
       i += 2
     } else if (flag === '-c') {
       i += 2
+    } else if (VALUE_OPTIONS.has(flag)) {
+      // the value is the next word, never the subcommand; the checks run with it too
+      const value = tokens[i + 1]
+      if (value !== undefined) globals.push(flag, value)
+      i += 2
     } else {
+      if (VALUE_OPTION_PREFIXES.some(prefix => flag.startsWith(prefix))) globals.push(flag)
       i += 1
     }
   }
   const subcommand = tokens[i]
   const rest = tokens.slice(i + 1)
-  if (subcommand === 'add') steps.push({ kind: 'add', cwd: stepCwd, args: rest })
-  if (subcommand === 'commit') steps.push({ kind: 'commit', cwd: stepCwd, all: rest.some(isAllFlag) })
+  const extra = globals.length > 0 ? { globals } : {}
+  if (subcommand === 'add') steps.push({ kind: 'add', cwd: stepCwd, args: rest, ...extra })
+  if (subcommand === 'commit') steps.push({ kind: 'commit', cwd: stepCwd, all: rest.some(isAllFlag), ...extra })
   return cwd
 }
 
@@ -178,7 +191,43 @@ export type GitResult = { files: string[]; findings: Finding[]; isTruncated: boo
 const INTERACTIVE = new Set(['-p', '--patch', '-i', '--interactive', '-e', '--edit'])
 const UPDATE_ONLY = new Set(['-u', '--update'])
 const DIFF_FLAGS = ['--no-color', '--no-ext-diff', '-U0']
-const NEW_FILE_DIFF = ['git', 'diff', '--no-index', ...DIFF_FLAGS, '--', '/dev/null']
+const NEW_FILE_DIFF = ['diff', '--no-index', ...DIFF_FLAGS, '--', '/dev/null']
+/** Every check runs git with paths unquoted where git allows, so unusual names stay readable. */
+const GIT = ['git', '-c', 'core.quotepath=off']
+const C_ESCAPES: Readonly<Record<string, number>> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, '\\': 92 }
+
+/**
+ * A path as git prints it, unquoted: git wraps a name holding quotes, backslashes
+ * or control characters (and, with quotepath on, non-ASCII) in double quotes with
+ * C escapes, octal ones standing for UTF-8 bytes.
+ */
+export function unquote(path: string): string {
+  if (path.length < 2 || !path.startsWith('"') || !path.endsWith('"')) return path
+  const bytes: number[] = []
+  const body = path.slice(1, -1)
+  for (let i = 0; i < body.length; i += 1) {
+    const char = body[i] ?? ''
+    if (char !== '\\') {
+      bytes.push(...new TextEncoder().encode(char))
+      continue
+    }
+    const next = body[i + 1] ?? ''
+    const octal = /^[0-7]{3}/.exec(body.slice(i + 1))
+    if (octal !== null) {
+      bytes.push(parseInt(octal[0], 8))
+      i += 3
+    } else {
+      bytes.push(C_ESCAPES[next] ?? next.charCodeAt(0))
+      i += 1
+    }
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes))
+}
+
+/** A `--- ` or `+++ ` header's path without its `a/` or `b/` side. */
+function headerPath(raw: string): string {
+  return unquote(raw.slice(4)).replace(/^[ab]\//, '')
+}
 const MAX_NEW_FILES = 200
 const GIT_TIMEOUT_MS = 15000
 
@@ -213,15 +262,23 @@ export function scanDiff(diff: string, patterns: readonly Pattern[], isSkipped: 
   const findings: Finding[] = []
   let file = ''
   let line = 0
+  // headers only come between `diff ` and the first `@@`: inside a hunk, a line
+  // reading `+++ x` is an added line whose content starts with `++ `
+  let isInHunk = false
   for (const raw of lines(diff)) {
-    if (raw.startsWith('+++ ')) {
-      file = raw.slice(4).replace(/^b\//, '')
+    if (raw.startsWith('diff ')) {
+      isInHunk = false
       continue
     }
-    if (raw.startsWith('--- ')) continue
+    if (!isInHunk && raw.startsWith('+++ ')) {
+      file = headerPath(raw)
+      continue
+    }
+    if (!isInHunk && raw.startsWith('--- ')) continue
     const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(raw)
     if (hunk !== null) {
       line = Number(hunk[1])
+      isInHunk = true
       continue
     }
     if (raw.startsWith('+')) {
@@ -243,36 +300,38 @@ export function scanDiff(diff: string, patterns: readonly Pattern[], isSkipped: 
  */
 async function checkAdd(
   run: Run,
+  git: readonly string[],
   args: readonly string[],
   init: ProcessRunInit,
   patterns: readonly Pattern[],
   isSkipped: (path: string) => boolean,
 ): Promise<GitResult> {
   if (args.some(arg => INTERACTIVE.has(arg))) return nothing()
-  const dryRun = await tryRun(run, ['git', 'add', '--dry-run', ...args], init)
+  const dryRun = await tryRun(run, [...git, 'add', '--dry-run', ...args], init)
   if (dryRun === undefined) return nothing()
   const staged = lines(dryRun.stdout)
     .map(entry => /^add '(.*)'$/.exec(entry)?.[1])
     .filter((path): path is string => path !== undefined)
+    .map(unquote)
   const files = staged.filter(isSecretFile)
   let isTruncated = dryRun.isStdoutTruncated
   if (staged.length === 0) return { files, findings: [], isTruncated }
   const pathspec = args.filter(arg => !arg.startsWith('-'))
   const findings: Finding[] = []
-  const changed = await tryRun(run, ['git', 'diff', ...DIFF_FLAGS, '--', ...pathspec], init)
+  const changed = await tryRun(run, [...git, 'diff', ...DIFF_FLAGS, '--', ...pathspec], init)
   if (changed !== undefined) {
     findings.push(...scanDiff(changed.stdout, patterns, isSkipped))
     isTruncated = isTruncated || changed.isStdoutTruncated
   }
   if (!args.some(arg => UPDATE_ONLY.has(arg))) {
-    const listed = await tryRun(run, ['git', 'ls-files', '--others', '--exclude-standard', '--', ...pathspec], init)
+    const listed = await tryRun(run, [...git, 'ls-files', '--others', '--exclude-standard', '--', ...pathspec], init)
     if (listed !== undefined) {
       const untracked = lines(listed.stdout)
-        .map(entry => entry.trim())
+        .map(entry => unquote(entry.trim()))
         .filter(path => path !== '' && !isSecretFile(path))
       if (listed.isStdoutTruncated || untracked.length > MAX_NEW_FILES) isTruncated = true
       for (const path of untracked.slice(0, MAX_NEW_FILES)) {
-        const added = await tryRun(run, [...NEW_FILE_DIFF, path], init, [0, 1])
+        const added = await tryRun(run, [...git, ...NEW_FILE_DIFF, path], init, [0, 1])
         if (added === undefined) continue
         findings.push(...scanDiff(added.stdout, patterns, isSkipped))
         isTruncated = isTruncated || added.isStdoutTruncated
@@ -285,18 +344,19 @@ async function checkAdd(
 /** A commit's staged names and added lines, against HEAD for -a and the index otherwise. */
 async function checkCommit(
   run: Run,
+  git: readonly string[],
   all: boolean,
   init: ProcessRunInit,
   patterns: readonly Pattern[],
   isSkipped: (path: string) => boolean,
 ): Promise<GitResult> {
   const base = all ? ['HEAD'] : ['--cached']
-  const names = await tryRun(run, ['git', 'diff', ...base, '--name-only'], init)
+  const names = await tryRun(run, [...git, 'diff', ...base, '--name-only'], init)
   if (names === undefined) return nothing()
   const files = lines(names.stdout)
-    .map(entry => entry.trim())
+    .map(entry => unquote(entry.trim()))
     .filter(path => path !== '' && isSecretFile(path))
-  const diff = await tryRun(run, ['git', 'diff', ...base, ...DIFF_FLAGS], init)
+  const diff = await tryRun(run, [...git, 'diff', ...base, ...DIFF_FLAGS], init)
   if (diff === undefined) return { files, findings: [], isTruncated: names.isStdoutTruncated }
   return {
     files,
@@ -313,7 +373,8 @@ export async function checkGitStep(
   isSkipped: (path: string) => boolean,
 ): Promise<GitResult> {
   const init: ProcessRunInit = step.cwd === undefined ? { timeoutMs: GIT_TIMEOUT_MS } : { cwd: step.cwd, timeoutMs: GIT_TIMEOUT_MS }
+  const git = [...GIT, ...(step.globals ?? [])]
   return step.kind === 'add'
-    ? checkAdd(run, step.args, init, patterns, isSkipped)
-    : checkCommit(run, step.all, init, patterns, isSkipped)
+    ? checkAdd(run, git, step.args, init, patterns, isSkipped)
+    : checkCommit(run, git, step.all, init, patterns, isSkipped)
 }

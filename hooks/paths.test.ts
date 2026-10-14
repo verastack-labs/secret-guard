@@ -65,3 +65,20 @@ describe('isSecretFile', () => {
     expect(isSecretFile('src/env.ts')).toBe(false)
   })
 })
+
+describe('skip globs, minor fixes', () => {
+  test('a whole-path glob matches an absolute path as well as a repo-relative one', () => {
+    const isSkipped = makeSkipMatcher(['test/fixtures/**'])
+    expect(isSkipped('test/fixtures/keys.ts')).toBe(true)
+    expect(isSkipped('C:\\code\\repo\\test\\fixtures\\keys.ts')).toBe(true)
+    expect(isSkipped('/home/me/repo/test/fixtures/keys.ts')).toBe(true)
+    expect(isSkipped('/home/me/repo/test/fixturesX/keys.ts')).toBe(false)
+  })
+  test('a glob written with backslashes matches', () => {
+    expect(makeSkipMatcher(['test\\fixtures\\**'])('test/fixtures/keys.ts')).toBe(true)
+  })
+  test('matching ignores case, as Windows paths do', () => {
+    expect(makeSkipMatcher(['**/Fixtures/**'])('C:/repo/fixtures/a.ts')).toBe(true)
+    expect(makeSkipMatcher(['*.TEST.*'])('a.test.ts')).toBe(true)
+  })
+})
